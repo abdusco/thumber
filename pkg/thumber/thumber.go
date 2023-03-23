@@ -22,42 +22,6 @@ import (
 	"github.com/abdusco/thumber/pkg/thumber/internal/fonts"
 )
 
-func drawTimestamp(font *truetype.Font, timestamp string) (image.Image, error) {
-
-	c := freetype.NewContext()
-	c.SetFont(font)
-	c.SetDPI(72)
-	fontSize := float64(12)
-	fontSizePx := int(c.PointToFix32(fontSize)) / 256
-	c.SetFontSize(fontSize)
-
-	tw, th, err := c.MeasureString(timestamp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to measure string: %w", err)
-	}
-
-	// freetype.Fix32 is a fixed-point representation of a number with 16 bits of precision for the fractional part. To convert these values to pixels, we need to divide them by 256
-	twPx := int(tw) / 256
-	thPx := int(th) / 256
-
-	padding := 4
-	img := image.NewRGBA(image.Rect(0, 0, twPx+padding, thPx+padding))
-	draw.Draw(img, img.Bounds(), image.Black, image.Point{X: 0, Y: 0}, draw.Src)
-
-	c.SetClip(img.Bounds())
-	c.SetDst(img)
-	c.SetSrc(image.White)
-
-	x := padding / 2
-	// adjust y position by 5% to account for baseline shift
-	y := int(math.Ceil(float64(fontSizePx))*0.95) + padding/2
-	if _, err := c.DrawString(timestamp, freetype.Pt(x, y)); err != nil {
-		return nil, fmt.Errorf("failed to draw string: %w", err)
-	}
-
-	return img, nil
-}
-
 func checkFfmpegInstalled() error {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return fmt.Errorf("ffmpeg not installed or not in PATH")
@@ -156,7 +120,62 @@ func (o ThumbOptions) Validate() error {
 	return nil
 }
 
-func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([]image.Image, error) {
+type Thumbnail struct {
+	image.Image
+	Timestamp time.Duration
+}
+
+func (t *Thumbnail) overlayTimestamp(font *truetype.Font, fontSizePt float64) error {
+	textImg, err := t.renderTimestamp(font, fontSizePt)
+	if err != nil {
+		return err
+	}
+	padding := 10 // from the edges of the tile
+	x := t.Image.Bounds().Dx() - textImg.Bounds().Dx() - padding
+	y := t.Image.Bounds().Dy() - textImg.Bounds().Dy() - padding
+	opacity := float64(1)
+	t.Image = imaging.Overlay(t.Image, textImg, image.Pt(x, y), opacity)
+
+	return nil
+}
+
+func (t *Thumbnail) renderTimestamp(font *truetype.Font, fontSizePt float64) (image.Image, error) {
+	text := formatDuration(t.Timestamp)
+
+	c := freetype.NewContext()
+	c.SetFont(font)
+	c.SetDPI(72)
+	fontSizePx := int(c.PointToFix32(fontSizePt)) / 256
+	c.SetFontSize(fontSizePt)
+
+	tw, th, err := c.MeasureString(text)
+	if err != nil {
+		return nil, fmt.Errorf("failed to measure string: %w", err)
+	}
+
+	// freetype.Fix32 is a fixed-point representation of a number with 16 bits of precision for the fractional part. To convert these values to pixels, we need to divide them by 256
+	twPx := int(tw) / 256
+	thPx := int(th) / 256
+
+	padding := 4
+	img := image.NewRGBA(image.Rect(0, 0, twPx+padding, thPx+padding))
+	draw.Draw(img, img.Bounds(), image.Black, image.Point{X: 0, Y: 0}, draw.Src)
+
+	c.SetClip(img.Bounds())
+	c.SetDst(img)
+	c.SetSrc(image.White)
+
+	x := padding / 2
+	// adjust y position by 5% to account for baseline shift
+	y := int(math.Ceil(float64(fontSizePx))*0.95) + padding/2
+	if _, err := c.DrawString(text, freetype.Pt(x, y)); err != nil {
+		return nil, fmt.Errorf("failed to draw string: %w", err)
+	}
+
+	return img, nil
+}
+
+func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([]Thumbnail, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid options: %w", err)
 	}
@@ -199,7 +218,7 @@ func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([
 	w := opts.TileWidth
 	h := opts.TileHeight
 
-	var thumbnails []image.Image
+	var thumbnails []Thumbnail
 
 	for i := 0; i < totalTiles; i++ {
 		t := start + time.Duration(i)*interval
@@ -210,16 +229,7 @@ func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([
 			continue
 		}
 
-		if opts.OverlayTimestamps {
-			tsImage, err := drawTimestamp(fonts.RobotoMonoMedium, formatDuration(t))
-			if err != nil {
-				slog.Error("failed to draw timestamp text", "timestamp", t, "error", err)
-				continue
-			}
-			opacity := float64(1)
-			img = imaging.Overlay(img, tsImage, image.Pt(img.Bounds().Dx()-tsImage.Bounds().Dx()-10, img.Bounds().Dy()-tsImage.Bounds().Dy()-10), opacity)
-		}
-		thumbnails = append(thumbnails, img)
+		thumbnails = append(thumbnails, Thumbnail{Image: img, Timestamp: t})
 	}
 
 	return thumbnails, nil
@@ -243,26 +253,37 @@ func Generate(ctx context.Context, videoPath string, opts ThumbOptions) (image.I
 		return nil, fmt.Errorf("generated 0 images")
 	}
 
-	return makeContactSheet(thumbs, opts.TileColumns, opts.Padding), nil
+	return makeContactSheet(
+		thumbs,
+		opts.TileColumns,
+		opts.Padding,
+		opts.OverlayTimestamps,
+	), nil
 }
 
-func makeContactSheet(thumbs []image.Image, columns, padding int) image.Image {
+func makeContactSheet(thumbs []Thumbnail, columns, padding int, withTimestamps bool) image.Image {
 	rows := int(math.Ceil(float64(len(thumbs)) / float64(columns)))
 
-	tw := thumbs[0].Bounds().Dx()
-	th := thumbs[0].Bounds().Dy()
+	tileWidth := thumbs[0].Bounds().Dx()
+	tileHeight := thumbs[0].Bounds().Dy()
 
-	w := tw*columns + (columns+1)*padding
-	h := th*rows + (rows+1)*padding
 	black := color.RGBA{}
+	w := tileWidth*columns + (columns+1)*padding
+	h := tileHeight*rows + (rows+1)*padding
 	canvas := imaging.New(w, h, black)
 
 	for i, img := range thumbs {
 		row := i / columns
 		col := i % columns
-		x := padding + col*tw + col*padding
-		y := padding + row*th + row*padding
+		x := padding + col*tileWidth + col*padding
+		y := padding + row*tileHeight + row*padding
 
+		if withTimestamps {
+			if err := img.overlayTimestamp(fonts.RobotoMonoMedium, 12); err != nil {
+				slog.Error("failed to overlay timestamp text", "timestamp", img.Timestamp, "error", err)
+				continue
+			}
+		}
 		canvas = imaging.Paste(canvas, img, image.Pt(x, y))
 	}
 	return canvas
