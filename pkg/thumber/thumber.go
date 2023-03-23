@@ -17,6 +17,8 @@ import (
 	"github.com/BurntSushi/freetype-go/freetype"
 	"github.com/BurntSushi/freetype-go/freetype/truetype"
 	"github.com/disintegration/imaging"
+	"github.com/sourcegraph/conc/pool"
+	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 
 	"github.com/abdusco/thumber/pkg/thumber/internal/fonts"
@@ -33,7 +35,7 @@ func checkFfmpegInstalled() error {
 	return nil
 }
 
-func extractThumbnail(ctx context.Context, filename string, timestamp time.Duration, width, height int) (image.Image, error) {
+func extractThumbnail(ctx context.Context, filename string, timestamp time.Duration, width, height int) (Thumbnail, error) {
 	if width == 0 {
 		width = -1
 	} else if height == 0 {
@@ -56,17 +58,17 @@ func extractThumbnail(ctx context.Context, filename string, timestamp time.Durat
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("failed to run ffmpeg: %w\nstderr=%s", err, string(exitErr.Stderr))
+			return Thumbnail{}, fmt.Errorf("failed to run ffmpeg: %w\nstderr=%s", err, string(exitErr.Stderr))
 		}
-		return nil, fmt.Errorf("failed to run ffmpeg: %w", err)
+		return Thumbnail{}, fmt.Errorf("failed to run ffmpeg: %w", err)
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(output))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %w", err)
+		return Thumbnail{}, fmt.Errorf("failed to decode image: %w", err)
 	}
 
-	return img, nil
+	return Thumbnail{Image: img, Timestamp: timestamp}, nil
 }
 
 func readDuration(ctx context.Context, videoPath string) (time.Duration, error) {
@@ -189,8 +191,6 @@ func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([
 		return nil, fmt.Errorf("failed to read video duration: %w", err)
 	}
 
-	duration = duration.Truncate(time.Second)
-
 	start := opts.From
 	end := duration
 	if opts.To != 0 {
@@ -215,21 +215,42 @@ func MakeThumbnails(ctx context.Context, videoPath string, opts ThumbOptions) ([
 		slog.Warn("interval is very small", "interval", interval)
 	}
 
-	w := opts.TileWidth
-	h := opts.TileHeight
+	type indexedThumb struct {
+		Thumbnail
+		Index int
+	}
 
-	var thumbnails []Thumbnail
+	p := pool.NewWithResults[indexedThumb]().
+		WithContext(ctx).
+		WithMaxGoroutines(4).
+		WithCollectErrored()
 
 	for i := 0; i < totalTiles; i++ {
-		t := start + time.Duration(i)*interval
-		slog.Debug("extracting thumbnail", "current", i+1, "total", totalTiles)
-		img, err := extractThumbnail(ctx, videoPath, t, w, h)
-		if err != nil {
-			slog.Error("failed to extract thumbnail", "timestamp", t, "error", err)
-			continue
-		}
+		i := i
+		p.Go(func(ctx context.Context) (indexedThumb, error) {
+			t := start + time.Duration(i)*interval
+			slog.Debug("extracting thumbnail", "current", i+1, "total", totalTiles)
+			th, err := extractThumbnail(ctx, videoPath, t, opts.TileWidth, opts.TileHeight)
+			if err != nil {
+				slog.Error("failed to extract thumbnail", "timestamp", t, "error", err)
+				return indexedThumb{}, err
+			}
+			return indexedThumb{Thumbnail: th, Index: i}, nil
+		})
+	}
 
-		thumbnails = append(thumbnails, Thumbnail{Image: img, Timestamp: t})
+	results, err := p.Wait()
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(results, func(a, b indexedThumb) bool {
+		return a.Index < b.Index
+	})
+
+	thumbnails := make([]Thumbnail, 0, len(results))
+	for _, r := range results {
+		thumbnails = append(thumbnails, r.Thumbnail)
 	}
 
 	return thumbnails, nil
