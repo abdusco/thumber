@@ -144,7 +144,6 @@ func (t *Thumbnail) renderTimestamp(font *truetype.Font, fontSizePt float64) (im
 
 	c := freetype.NewContext()
 	c.SetFont(font)
-	c.SetDPI(72)
 	fontSizePx := int(c.PointToFix32(fontSizePt)) / 256
 	c.SetFontSize(fontSizePt)
 
@@ -153,7 +152,8 @@ func (t *Thumbnail) renderTimestamp(font *truetype.Font, fontSizePt float64) (im
 		return nil, fmt.Errorf("failed to measure string: %w", err)
 	}
 
-	// freetype.Fix32 is a fixed-point representation of a number with 16 bits of precision for the fractional part. To convert these values to pixels, we need to divide them by 256
+	// freetype.Fix32 is a fixed-point representation of a number with 16 bits of precision for the fractional part.
+	// To convert these values to pixels, we need to divide them by 256
 	twPx := int(tw) / 256
 	thPx := int(th) / 256
 
