@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ func main() {
 		logLevel = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.HandlerOptions{Level: logLevel}.NewTextHandler(os.Stderr)))
+
 	if err := cliCtx.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -46,6 +48,7 @@ type cliArgs struct {
 	TileHeight        int      `help:"Tile height in px, optional"`
 	Columns           int      `default:"3" help:"Columns of tile grid"`
 	IntervalSeconds   int      `default:"60" help:"Interval between tiles in seconds"`
+	JPEGQuality       int      `name:"quality" default:"80" help:"JPEG quality"`
 	Padding           int      `help:"Padding around tiles in px"`
 	OverlayTimestamps bool     `help:"Overlay timestamp on each tile"`
 	Debug             bool     `help:"Enable verbose logging"`
@@ -79,30 +82,32 @@ func (a cliArgs) Run() error {
 		return fmt.Errorf("failed to generate thumbnails: %w", err)
 	}
 
-	var f io.Writer
-	if a.OutputPath == "-" {
-		f = os.Stdout
-	} else {
-		f, err = os.Create(a.OutputPath)
-		if err != nil {
-			return fmt.Errorf("failed to create file: %w", err)
-		}
+	f, err := a.OutputFile()
+	if err != nil {
+		return fmt.Errorf("failed to open file for writing: %w", err)
 	}
 
-	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 90}); err != nil {
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: a.JPEGQuality}); err != nil {
 		return fmt.Errorf("failed to encode as jpeg: %w", err)
 	}
 	return nil
 }
 
-type Duration string
-
-func reverse[T comparable](s []T) []T {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
+func (a cliArgs) OutputFile() (io.Writer, error) {
+	if a.OutputPath == "-" {
+		return os.Stdout, nil
 	}
-	return s
+
+	if a.OutputPath == "" {
+		dir := filepath.Dir(a.VideoPath)
+		base := strings.TrimSuffix(a.VideoPath, filepath.Ext(a.VideoPath))
+		a.OutputPath = filepath.Join(dir, fmt.Sprintf("%s.thumbs.jpg", base))
+	}
+
+	return os.Create(a.OutputPath)
 }
+
+type Duration string
 
 func (d Duration) Duration() (time.Duration, error) {
 	if d == "" {
@@ -139,4 +144,11 @@ func (d Duration) Duration() (time.Duration, error) {
 
 	duration := time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute + time.Duration(second)*time.Second
 	return duration, nil
+}
+
+func reverse[T any](s []T) []T {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+	return s
 }
