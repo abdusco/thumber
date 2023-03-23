@@ -41,7 +41,7 @@ func main() {
 type cliArgs struct {
 	Version           kong.VersionFlag `help:"Show version and exit"`
 	VideoPath         string           `arg:"" help:"Path to video"`
-	OutputPath        string           `short:"o" help:"Output path to save JPEG, use - for stdout"`
+	OutputPath        string           `short:"o" help:"Output path to save JPEG, use - for stdout. Defaults to $filename.thumbs.jpg"`
 	From              Duration         `default:"10" help:"Starting point in seconds, 11h22m33s or mm:ss or hh:mm:ss format"`
 	To                Duration         `help:"Stopping point"`
 	TileWidth         int              `default:"540" help:"Tile width in px"`
