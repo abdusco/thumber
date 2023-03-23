@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-var Commit string
-var CommitTime string
-
 type VersionInfo struct {
 	Commit     string
 	CommitTime string
@@ -18,7 +15,7 @@ func (v VersionInfo) String() string {
 	return fmt.Sprintf("%s.%s", v.CommitTime, v.Commit)
 }
 
-func GitVersion() VersionInfo {
+var Version = func() VersionInfo {
 	var info VersionInfo
 	if build, ok := debug.ReadBuildInfo(); ok {
 		for _, setting := range build.Settings {
@@ -31,6 +28,5 @@ func GitVersion() VersionInfo {
 			}
 		}
 	}
-
 	return info
-}
+}()

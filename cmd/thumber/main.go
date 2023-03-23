@@ -24,7 +24,7 @@ func main() {
 	cliCtx := kong.Parse(
 		&args,
 		kong.Name("thumber"),
-		kong.Vars{"version": version.GitVersion().String()},
+		kong.Vars{"version": version.Version.String()},
 	)
 
 	logLevel := slog.LevelInfo
@@ -39,19 +39,19 @@ func main() {
 }
 
 type cliArgs struct {
-	Version           kong.VersionFlag
-	VideoPath         string   `arg:"" help:"Path to video"`
-	OutputPath        string   `short:"o" help:"Output path to save JPEG, use - for stdout"`
-	From              Duration `default:"10" help:"Starting point in seconds, 11h22m33s or mm:ss or hh:mm:ss format"`
-	To                Duration `help:"Stopping point"`
-	TileWidth         int      `default:"540" help:"Tile width in px"`
-	TileHeight        int      `help:"Tile height in px, optional"`
-	Columns           int      `default:"3" help:"Columns of tile grid"`
-	IntervalSeconds   int      `default:"60" help:"Interval between tiles in seconds"`
-	JPEGQuality       int      `name:"quality" default:"80" help:"JPEG quality"`
-	Padding           int      `help:"Padding around tiles in px"`
-	OverlayTimestamps bool     `help:"Overlay timestamp on each tile"`
-	Debug             bool     `help:"Enable verbose logging"`
+	Version           kong.VersionFlag `help:"Show version and exit"`
+	VideoPath         string           `arg:"" help:"Path to video"`
+	OutputPath        string           `short:"o" help:"Output path to save JPEG, use - for stdout"`
+	From              Duration         `default:"10" help:"Starting point in seconds, 11h22m33s or mm:ss or hh:mm:ss format"`
+	To                Duration         `help:"Stopping point"`
+	TileWidth         int              `default:"540" help:"Tile width in px"`
+	TileHeight        int              `help:"Tile height in px, optional"`
+	Columns           int              `default:"3" help:"Columns of tile grid"`
+	IntervalSeconds   int              `default:"60" help:"Interval between tiles in seconds"`
+	JPEGQuality       int              `name:"quality" default:"80" help:"JPEG quality"`
+	Padding           int              `help:"Padding around tiles in px"`
+	OverlayTimestamps bool             `help:"Overlay timestamp on each tile"`
+	Debug             bool             `help:"Enable verbose logging"`
 }
 
 func (a cliArgs) Run() error {
