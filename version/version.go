@@ -26,7 +26,7 @@ func GitVersion() VersionInfo {
 			case "vcs.revision":
 				info.Commit = setting.Value[:7]
 			case "vcs.time":
-				d, _ := time.Parse(`2006-01-02T15:04:05Z`, setting.Value)
+				d, _ := time.Parse(time.RFC3339, setting.Value)
 				info.CommitTime = d.Format("20060102150405")
 			}
 		}
