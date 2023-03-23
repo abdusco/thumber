@@ -100,7 +100,7 @@ func (a cliArgs) OutputFile() (io.Writer, error) {
 
 	if a.OutputPath == "" {
 		dir := filepath.Dir(a.VideoPath)
-		base := strings.TrimSuffix(a.VideoPath, filepath.Ext(a.VideoPath))
+		base := strings.TrimSuffix(filepath.Base(a.VideoPath), filepath.Ext(a.VideoPath))
 		a.OutputPath = filepath.Join(dir, fmt.Sprintf("%s.thumbs.jpg", base))
 	}
 
