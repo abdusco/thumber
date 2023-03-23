@@ -119,8 +119,10 @@ func (d Duration) Duration() (time.Duration, error) {
 	}
 
 	parts := reverse(strings.Split(strings.TrimSpace(string(d)), ":"))
+
 	var hour, minute, second int
 	var err error
+
 	if len(parts) > 2 {
 		hour, err = strconv.Atoi(parts[2])
 		if err != nil {

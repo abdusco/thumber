@@ -23,26 +23,35 @@ import (
 )
 
 func drawTimestamp(font *truetype.Font, timestamp string) (image.Image, error) {
-	fontSize := float64(12)
-	padding := 6
 
 	c := freetype.NewContext()
 	c.SetFont(font)
 	c.SetDPI(72)
+	fontSize := float64(12)
+	fontSizePx := int(c.PointToFix32(fontSize)) / 256
 	c.SetFontSize(fontSize)
 
 	tw, th, err := c.MeasureString(timestamp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to measure string: %w", err)
 	}
-	img := image.NewRGBA(image.Rect(0, 0, (int(tw)/256)+padding, (int(th)/256)+padding))
+
+	// freetype.Fix32 is a fixed-point representation of a number with 16 bits of precision for the fractional part. To convert these values to pixels, we need to divide them by 256
+	twPx := int(tw) / 256
+	thPx := int(th) / 256
+
+	padding := 4
+	img := image.NewRGBA(image.Rect(0, 0, twPx+padding, thPx+padding))
 	draw.Draw(img, img.Bounds(), image.Black, image.Point{X: 0, Y: 0}, draw.Src)
+
 	c.SetClip(img.Bounds())
 	c.SetDst(img)
-	c.SetSrc(image.White) // foreground
+	c.SetSrc(image.White)
 
-	pt := freetype.Pt(padding/2, 3+int(c.PointToFix32(fontSize)>>8))
-	if _, err := c.DrawString(timestamp, pt); err != nil {
+	x := padding / 2
+	// adjust y position by 5% to account for baseline shift
+	y := int(math.Ceil(float64(fontSizePx))*0.95) + padding/2
+	if _, err := c.DrawString(timestamp, freetype.Pt(x, y)); err != nil {
 		return nil, fmt.Errorf("failed to draw string: %w", err)
 	}
 
