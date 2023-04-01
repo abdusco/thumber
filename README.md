@@ -2,6 +2,10 @@
 
 A mini utility/library that generates contact sheets for videos using ffmpeg.
 
+## Requirements
+
+- `ffmpeg` installed and available in `$PATH`.
+
 ## Usage
 
 ```shell
@@ -29,9 +33,9 @@ Flags:
       --quality=80             JPEG quality
       --padding=INT            Padding around tiles in px
       --overlay-timestamps     Overlay timestamp on each tile
-      --overlay-background="#000000FF"
+      --overlay-background="transparent"
                                Timestamp background color as RGB or RGBA hex
-                               color e.g. #FFF59D
+                               color or "transparent" e.g. #FFF59D
       --debug                  Enable verbose logging
 
 ```
