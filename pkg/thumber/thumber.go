@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"os/exec"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
+	"golang.org/x/image/draw"
 
 	"github.com/abdusco/thumber/pkg/thumber/internal/fonts"
 )
@@ -100,15 +100,48 @@ func readDuration(ctx context.Context, videoPath string) (time.Duration, error) 
 }
 
 type ThumbOptions struct {
-	From              time.Duration
-	To                time.Duration
-	TileColumns       int
-	TileCount         int
-	Interval          time.Duration
-	TileWidth         int
-	TileHeight        int
-	OverlayTimestamps bool
-	Padding           int
+	From                time.Duration
+	To                  time.Duration
+	TileColumns         int
+	TileCount           int
+	Interval            time.Duration
+	TileWidth           int
+	TileHeight          int
+	OverlayTimestamps   bool
+	TimestampBackground color.Color
+	Padding             int
+}
+
+func ParseColor(hex string) (color.Color, error) {
+	switch hex {
+	case "transparent":
+		return color.Transparent, nil
+	}
+
+	// Remove hash symbol if present
+	if hex[0] == '#' {
+		hex = hex[1:]
+	}
+
+	var r, g, b, a int64
+
+	if len(hex) == 6 {
+		// RGB only
+		r, _ = strconv.ParseInt(hex[0:2], 16, 64)
+		g, _ = strconv.ParseInt(hex[2:4], 16, 64)
+		b, _ = strconv.ParseInt(hex[4:6], 16, 64)
+		a = 255 // Default alpha: 100%
+	} else if len(hex) == 8 {
+		// RGB + alpha
+		r, _ = strconv.ParseInt(hex[0:2], 16, 64)
+		g, _ = strconv.ParseInt(hex[2:4], 16, 64)
+		b, _ = strconv.ParseInt(hex[4:6], 16, 64)
+		a, _ = strconv.ParseInt(hex[6:8], 16, 64)
+	} else {
+		return color.RGBA{}, fmt.Errorf("invalid hex color string: %s", hex)
+	}
+
+	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)}, nil
 }
 
 func (o ThumbOptions) Validate() error {
@@ -127,8 +160,8 @@ type Thumbnail struct {
 	Timestamp time.Duration
 }
 
-func (t *Thumbnail) overlayTimestamp(font *truetype.Font, fontSizePt float64) error {
-	textImg, err := t.renderTimestamp(font, fontSizePt)
+func (t *Thumbnail) overlayTimestamp(r timestampRenderer) error {
+	textImg, err := r.Render(formatDuration(t.Timestamp))
 	if err != nil {
 		return err
 	}
@@ -141,13 +174,22 @@ func (t *Thumbnail) overlayTimestamp(font *truetype.Font, fontSizePt float64) er
 	return nil
 }
 
-func (t *Thumbnail) renderTimestamp(font *truetype.Font, fontSizePt float64) (image.Image, error) {
-	text := formatDuration(t.Timestamp)
+type timestampRenderer interface {
+	Render(text string) (image.Image, error)
+}
 
+type defaultRenderer struct {
+	Font            *truetype.Font
+	FontSizePt      float64
+	BackgroundColor color.Color
+	ForegroundColor color.Color
+}
+
+func (r defaultRenderer) Render(text string) (image.Image, error) {
 	c := freetype.NewContext()
-	c.SetFont(font)
-	fontSizePx := int(c.PointToFix32(fontSizePt)) / 256
-	c.SetFontSize(fontSizePt)
+	c.SetFont(r.Font)
+	fontSizePx := int(c.PointToFix32(r.FontSizePt)) / 256
+	c.SetFontSize(r.FontSizePt)
 
 	tw, th, err := c.MeasureString(text)
 	if err != nil {
@@ -161,7 +203,7 @@ func (t *Thumbnail) renderTimestamp(font *truetype.Font, fontSizePt float64) (im
 
 	padding := 4
 	img := image.NewRGBA(image.Rect(0, 0, twPx+padding, thPx+padding))
-	draw.Draw(img, img.Bounds(), image.Black, image.Point{X: 0, Y: 0}, draw.Src)
+	draw.Draw(img, img.Bounds(), image.NewUniform(r.BackgroundColor), image.Point{X: 0, Y: 0}, draw.Src)
 
 	c.SetClip(img.Bounds())
 	c.SetDst(img)
@@ -276,31 +318,36 @@ func Generate(ctx context.Context, videoPath string, opts ThumbOptions) (image.I
 
 	return makeContactSheet(
 		thumbs,
-		opts.TileColumns,
-		opts.Padding,
-		opts.OverlayTimestamps,
+		opts,
 	), nil
 }
 
-func makeContactSheet(thumbs []Thumbnail, columns, padding int, withTimestamps bool) image.Image {
-	rows := int(math.Ceil(float64(len(thumbs)) / float64(columns)))
+func makeContactSheet(thumbs []Thumbnail, opts ThumbOptions) image.Image {
+	rows := int(math.Ceil(float64(len(thumbs)) / float64(opts.TileColumns)))
 
 	tileWidth := thumbs[0].Bounds().Dx()
 	tileHeight := thumbs[0].Bounds().Dy()
 
 	black := color.RGBA{}
-	w := tileWidth*columns + (columns+1)*padding
-	h := tileHeight*rows + (rows+1)*padding
+	w := tileWidth*opts.TileColumns + (opts.TileColumns+1)*opts.Padding
+	h := tileHeight*rows + (rows+1)*opts.Padding
 	canvas := imaging.New(w, h, black)
 
-	for i, img := range thumbs {
-		row := i / columns
-		col := i % columns
-		x := padding + col*tileWidth + col*padding
-		y := padding + row*tileHeight + row*padding
+	renderer := defaultRenderer{
+		Font:            fonts.RobotoMonoMedium,
+		FontSizePt:      12,
+		BackgroundColor: opts.TimestampBackground,
+		ForegroundColor: color.White,
+	}
 
-		if withTimestamps {
-			if err := img.overlayTimestamp(fonts.RobotoMonoMedium, 12); err != nil {
+	for i, img := range thumbs {
+		row := i / opts.TileColumns
+		col := i % opts.TileColumns
+		x := opts.Padding + col*tileWidth + col*opts.Padding
+		y := opts.Padding + row*tileHeight + row*opts.Padding
+
+		if opts.OverlayTimestamps {
+			if err := img.overlayTimestamp(renderer); err != nil {
 				slog.Error("failed to overlay timestamp text", "timestamp", img.Timestamp, "error", err)
 				continue
 			}

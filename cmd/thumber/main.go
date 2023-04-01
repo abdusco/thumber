@@ -51,6 +51,7 @@ type cliArgs struct {
 	JPEGQuality       int              `name:"quality" default:"80" help:"JPEG quality"`
 	Padding           int              `help:"Padding around tiles in px"`
 	OverlayTimestamps bool             `help:"Overlay timestamp on each tile"`
+	OverlayBackground string           `help:"Timestamp background color as RGB or RGBA hex color or \"transparent\" e.g. #FFF59D" default:"transparent"`
 	Debug             bool             `help:"Enable verbose logging"`
 }
 
@@ -65,15 +66,21 @@ func (a cliArgs) Run() error {
 		return fmt.Errorf("invalid to: %w", err)
 	}
 
+	color, err := thumber.ParseColor(a.OverlayBackground)
+	if err != nil {
+		return fmt.Errorf("invalid overlay background color: %w", err)
+	}
+
 	opts := thumber.ThumbOptions{
-		From:              from,
-		To:                to,
-		TileColumns:       a.Columns,
-		Interval:          time.Second * time.Duration(a.IntervalSeconds),
-		TileWidth:         a.TileWidth,
-		TileHeight:        a.TileHeight,
-		Padding:           a.Padding,
-		OverlayTimestamps: a.OverlayTimestamps,
+		From:                from,
+		To:                  to,
+		TileColumns:         a.Columns,
+		Interval:            time.Second * time.Duration(a.IntervalSeconds),
+		TileWidth:           a.TileWidth,
+		TileHeight:          a.TileHeight,
+		Padding:             a.Padding,
+		OverlayTimestamps:   a.OverlayTimestamps,
+		TimestampBackground: color,
 	}
 	slog.Debug("parsed options", "options", opts)
 
